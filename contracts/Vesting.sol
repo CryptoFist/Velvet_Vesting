@@ -7,87 +7,71 @@ import "hardhat/console.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/finance/VestingWallet.sol";
 
-contract Vesting is Ownable, ReentrancyGuard {
-   event ERC20Released(address indexed token, uint256 amount);
+contract Vesting is Ownable, ReentrancyGuard, ERC20, VestingWallet {
+   uint256 constant INITIAL_SUPPLY = 100 * 10**6 * 1e18; // 100 million
+   address[] private benficiaryAddresses;
 
-   address[] private benficiary;
-   uint256 private start;
-   uint256 private duration = 365 days;
-   mapping(address => uint256) private erc20Released;
-
-   modifier whenNotEmptyAddress(address[] memory benficiaries_) {
-      require(
-         benficiaries_.length > 0,
-         "VestingWallet: should have more than beneficiary address"
-      );
-
-      require(
-         benficiaries_.length <= 10,
-         "VestingWallet: can't be greater than 10 addresses"
-      );
-
-      uint8 i = 0;
-
-      for (i; i < benficiaries_.length; i ++) {
-         require(benficiaries_[i] != address(0), "VestingWallet: beneficiary is zero address");
-      }
-      _;
-   }
+   uint256 private _released;
 
    constructor(
-      address[] memory benficiaries_,
-      uint256 startTimestamp_
-   ) whenNotEmptyAddress(benficiaries_) {
-      require (startTimestamp_ >= block.timestamp, "VestingWallet: should later than now");
-      benficiary = benficiaries_;
-      start = startTimestamp_;
+      string memory name,
+      string memory symbol,
+      address[] memory benficiaryAddress,
+      uint64 startTimestamp
+   )
+      ERC20(name, symbol)
+      VestingWallet(benficiaryAddress[0], startTimestamp, 365 days)
+   {
+      require (benficiaryAddress.length == 10, 'VestingWallet: should enter 10 addresses');
+      _mint(address(this), INITIAL_SUPPLY);
+
+      uint i = 0;
+      for (i; i < 10; i ++) {
+         benficiaryAddresses.push(benficiaryAddress[i]);
+      }
    }
 
-   function getBeneficiary() public view  returns (address[] memory) {
-      return benficiary;
+   function allBeneficiary() public view returns (address[] memory) {
+      return benficiaryAddresses;
    }
 
-   function getStart() public view  returns (uint256) {
-      return start;
+   function released() public view virtual override returns (uint256) {
+      return _released;
    }
 
-   function getDuration() public view  returns (uint256) {
-      return duration;
-   }
-
-   function released(address token_) public view virtual returns (uint256) {
-      return erc20Released[token_];
-   }
-
-   function transferToBenficiaries(address token_, uint256 releasable) internal {
+   function transferToBenficiary(uint256 amount_) internal {
       uint8 i = 0;
 
-      for (i; i < benficiary.length; i ++) {
-         SafeERC20.safeTransfer(IERC20(token_), benficiary[i], releasable);
+      for (i; i < benficiaryAddresses.length; i ++) {
+         _transfer(address(this), benficiaryAddresses[i], amount_);
       }
    }
 
-   function release(address token_) public  {
-      uint256 releasable = vestedAmount(token_, uint64(block.timestamp)) - released(token_);
-      erc20Released[token_] += releasable;
-      emit ERC20Released(token_, releasable);
-      transferToBenficiaries(token_, releasable);
+   function release() public virtual override {
+      uint256 releasable = vestedAmount(uint64(block.timestamp)) - released();
+      _released += releasable;
+      emit EtherReleased(releasable);
+      
+      transferToBenficiary(releasable / 10);
    }
 
-   function vestedAmount(address token_, uint64 timestamp_) public view  returns (uint256) {
-      return _vestingSchedule(IERC20(token_).balanceOf(address(this)) + released(token_), timestamp_);
+   function vestedAmount(uint64 timestamp) public view virtual override returns (uint256) {
+      return _vestingSchedule(balanceOf(address(this)) + released(), timestamp);
    }
 
-   function _vestingSchedule(uint256 totalAllocation, uint64 timestamp) internal view  returns (uint256) {
-      if (timestamp < start) {
+   function _vestingSchedule(
+      uint256 totalAllocation, 
+      uint64 timestamp
+   ) internal view virtual override returns (uint256) {
+      if (timestamp < start()) {
          return 0;
-      } else if (timestamp > start + duration) {
+      } else if (timestamp > start() + duration()) {
          return totalAllocation;
       } else {
-         return (totalAllocation * (timestamp - start)) / duration;
+         return (totalAllocation * (timestamp - start())) / duration();
       }
    }
-
-   receive() external payable  {}
 }

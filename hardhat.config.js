@@ -5,7 +5,7 @@
  require('@nomiclabs/hardhat-ethers');
  
  module.exports = {
-   defaultNetwork: "hardhat",
+   defaultNetwork: "ropsten",
    networks: {
      hardhat: {
        allowUnlimitedContractSize: true,
